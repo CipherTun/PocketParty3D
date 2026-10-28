@@ -30,6 +30,12 @@ var touch_left := false
 var touch_right := false
 var touch_accelerate := false
 var touch_brake := false
+var countdown_remaining := 3.0
+var race_started := false
+var race_elapsed := 0.0
+var finish_panel: PanelContainer
+var finish_label: Label
+var restart_button: Button
 
 func _ready() -> void:
     var config := ConfigFile.new()
@@ -44,6 +50,7 @@ func _ready() -> void:
         _create_racer(i)
 
     _refresh_hud()
+    _set_touch_controls_enabled(false)
 
 func _build_track() -> void:
     var ground := StaticBody3D.new()
@@ -190,7 +197,17 @@ func _physics_process(delta: float) -> void:
     if finished:
         return
 
+    if not race_started:
+        countdown_remaining -= delta
+        _refresh_hud()
+        if countdown_remaining <= 0.0:
+            race_started = true
+            race_time = 0.0
+            _set_touch_controls_enabled(true)
+        return
+
     race_time += delta
+    race_elapsed = race_time
 
     for racer in racers:
         if racer["done"]:
@@ -204,7 +221,8 @@ func _physics_process(delta: float) -> void:
         if racer["bot"]:
             var target: Vector3 = WAYPOINTS[int(racer["checkpoint"])]
             var to_target := target - car.global_position
-            var desired_angle := atan2(to_target.x, to_target.z)
+            # Cars travel along -Z at rotation 0, so aim using -target.z.
+            var desired_angle := atan2(to_target.x, -to_target.z)
             var angle_difference := wrapf(
                 desired_angle - car.rotation.y, -PI, PI)
             steering = clampf(angle_difference * 2.0, -1.0, 1.0)
@@ -257,7 +275,8 @@ func _update_checkpoint(racer: Dictionary) -> void:
                 break
         if all_done:
             finished = true
-            help_label.text = "RACE FINISHED  •  Press R to race again"
+            _set_touch_controls_enabled(false)
+            help_label.text = "RACE FINISHED  •  Tap RACE AGAIN"
 
 func _process(_delta: float) -> void:
     if finished and Input.is_key_pressed(KEY_R):
@@ -293,6 +312,24 @@ func _build_hud() -> void:
     )
     column.add_child(back)
 
+    finish_panel = PanelContainer.new()
+    finish_panel.set_anchors_preset(Control.PRESET_CENTER)
+    finish_panel.position = Vector2(-190, -80)
+    finish_panel.custom_minimum_size = Vector2(380, 160)
+    finish_panel.visible = false
+    layer.add_child(finish_panel)
+    var finish_column := VBoxContainer.new()
+    finish_panel.add_child(finish_column)
+    finish_label = Label.new()
+    finish_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+    finish_label.add_theme_font_size_override("font_size", 24)
+    finish_column.add_child(finish_label)
+    restart_button = Button.new()
+    restart_button.text = "RACE AGAIN"
+    restart_button.custom_minimum_size = Vector2(220, 48)
+    restart_button.pressed.connect(func() -> void: get_tree().reload_current_scene())
+    finish_column.add_child(restart_button)
+
     # Touch controls for phones and tablets.
     var controls := Control.new()
     controls.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -324,7 +361,17 @@ func _add_touch_button(parent: Control, caption: String, action: String,
 
     button.button_down.connect(_set_touch_action.bind(action, true))
     button.button_up.connect(_set_touch_action.bind(action, false))
+    button.focus_mode = Control.FOCUS_NONE
     parent.add_child(button)
+
+func _set_touch_controls_enabled(enabled: bool) -> void:
+    for child in get_children():
+        if child is CanvasLayer:
+            for control in child.get_children():
+                if control is Control:
+                    for button in control.get_children():
+                        if button is Button and button.text in ["◀", "▶", "BRAKE", "GO"]:
+                            button.disabled = not enabled
 
 func _set_touch_action(action: String, pressed: bool) -> void:
     match action:
@@ -340,7 +387,12 @@ func _set_touch_action(action: String, pressed: bool) -> void:
 func _refresh_hud() -> void:
     if hud == null:
         return
-    var lines := ["MICRO RACERS  •  3 LAPS"]
+    var lines: Array[String] = []
+    if not race_started:
+        lines.append("GET READY")
+        lines.append(str(maxi(1, int(ceil(countdown_remaining)))))
+    else:
+        lines.append("MICRO RACERS  •  3 LAPS  •  %05.1f s" % race_time)
     for racer in racers:
         var number := int(racer["index"]) + 1
         var name := "P" + str(number) if number <= player_count else "BOT " + str(number)
@@ -349,3 +401,7 @@ func _refresh_hud() -> void:
             "  FINISHED" if racer["done"] else ""
         ])
     hud.text = "\n".join(lines)
+    if finished and finish_panel != null:
+        finish_panel.visible = true
+        if finish_label != null:
+            finish_label.text = "RACE COMPLETE!\nTIME: %05.1f s" % race_elapsed
