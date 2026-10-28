@@ -1,0 +1,38 @@
+name: Validate Godot Project
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Download pinned Godot
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="4.7.2"
+          ARCHIVE="Godot_v${VERSION}-stable_linux.x86_64.zip"
+          URL="https://github.com/godotengine/godot/releases/download/${VERSION}-stable/${ARCHIVE}"
+          curl --fail --location --retry 3 "$URL" --output godot.zip
+          unzip -q godot.zip -d godot-bin
+          GODOT="$(find godot-bin -maxdepth 1 -type f -name 'Godot_*' | head -n 1)"
+          test -n "$GODOT"
+          chmod +x "$GODOT"
+          echo "GODOT_BIN=$GODOT" >> "$GITHUB_ENV"
+
+      - name: Validate project and scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$GODOT_BIN" --headless --editor --path . --quit

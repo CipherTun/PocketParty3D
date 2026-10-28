@@ -1,0 +1,17 @@
+name: Android Debug Build (planned)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain current stage
+        run: |
+          echo "Android APK export will be enabled after export presets"
+          echo "and the matching Godot Android templates are configured."
+          echo "This workflow deliberately does not produce a fake APK."
