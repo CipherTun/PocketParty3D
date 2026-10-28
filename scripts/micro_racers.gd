@@ -26,6 +26,10 @@ var race_time := 0.0
 var finished := false
 var hud: Label
 var help_label: Label
+var touch_left := false
+var touch_right := false
+var touch_accelerate := false
+var touch_brake := false
 
 func _ready() -> void:
     var config := ConfigFile.new()
@@ -207,10 +211,10 @@ func _physics_process(delta: float) -> void:
             throttle = 1.0 if absf(angle_difference) < 1.5 else 0.55
         else:
             var keys: Dictionary = PLAYER_KEYS[index]
-            throttle = float(Input.is_key_pressed(keys["up"])) \
-                - float(Input.is_key_pressed(keys["down"]))
-            steering = float(Input.is_key_pressed(keys["right"])) \
-                - float(Input.is_key_pressed(keys["left"]))
+            throttle = maxf(float(Input.is_key_pressed(keys["up"])), float(touch_accelerate)) \
+                - maxf(float(Input.is_key_pressed(keys["down"])), float(touch_brake))
+            steering = maxf(float(Input.is_key_pressed(keys["right"])), float(touch_right)) \
+                - maxf(float(Input.is_key_pressed(keys["left"])), float(touch_left))
 
         var speed: float = racer["speed"]
         speed += throttle * 13.0 * delta
@@ -288,6 +292,50 @@ func _build_hud() -> void:
             get_tree().change_scene_to_file("res://scenes/menus/main_menu.tscn")
     )
     column.add_child(back)
+
+    # Touch controls for phones and tablets.
+    var controls := Control.new()
+    controls.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+    controls.mouse_filter = Control.MOUSE_FILTER_PASS
+    layer.add_child(controls)
+
+    _add_touch_button(controls, "◀", "left", false, 20, -112)
+    _add_touch_button(controls, "▶", "right", false, 116, -112)
+    _add_touch_button(controls, "BRAKE", "brake", true, -202, -112)
+    _add_touch_button(controls, "GO", "accelerate", true, -106, -112)
+
+func _add_touch_button(parent: Control, caption: String, action: String,
+        right_side: bool, horizontal_offset: float, vertical_offset: float) -> void:
+    var button := Button.new()
+    button.text = caption
+    button.custom_minimum_size = Vector2(86, 78)
+    button.add_theme_font_size_override("font_size", 22 if caption.length() <= 2 else 15)
+    button.modulate = Color(1, 1, 1, 0.88)
+
+    if right_side:
+        button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+    else:
+        button.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+
+    button.offset_left = horizontal_offset
+    button.offset_right = horizontal_offset + 86
+    button.offset_top = vertical_offset
+    button.offset_bottom = vertical_offset + 78
+
+    button.button_down.connect(_set_touch_action.bind(action, true))
+    button.button_up.connect(_set_touch_action.bind(action, false))
+    parent.add_child(button)
+
+func _set_touch_action(action: String, pressed: bool) -> void:
+    match action:
+        "left":
+            touch_left = pressed
+        "right":
+            touch_right = pressed
+        "accelerate":
+            touch_accelerate = pressed
+        "brake":
+            touch_brake = pressed
 
 func _refresh_hud() -> void:
     if hud == null:
