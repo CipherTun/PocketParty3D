@@ -1,17 +1,138 @@
-name: Android Debug Build (planned)
+name: Android Debug APK
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'project.godot'
+      - 'export_presets.cfg'
+      - 'scenes/**'
+      - 'scripts/**'
+      - '.github/workflows/android-debug.yml'
 
 permissions:
   contents: read
 
 jobs:
-  status:
+  build-debug-apk:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+
     steps:
-      - name: Explain current stage
+      - name: Checkout project
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        shell: bash
         run: |
-          echo "Android APK export will be enabled after export presets"
-          echo "and the matching Godot Android templates are configured."
-          echo "This workflow deliberately does not produce a fake APK."
+          set -euo pipefail
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-36" \
+            "build-tools;36.1.0"
+          yes | sdkmanager --licenses >/dev/null || true
+
+      - name: Download Godot editor and matching export templates
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="4.7.2"
+          BASE="https://github.com/godotengine/godot/releases/download/${VERSION}-stable"
+
+          curl --fail --location --retry 3 \
+            "$BASE/Godot_v${VERSION}-stable_linux.x86_64.zip" \
+            --output "$RUNNER_TEMP/godot.zip"
+
+          curl --fail --location --retry 3 \
+            "$BASE/Godot_v${VERSION}-stable_export_templates.tpz" \
+            --output "$RUNNER_TEMP/templates.tpz"
+
+          mkdir -p "$RUNNER_TEMP/godot-bin"
+          unzip -q "$RUNNER_TEMP/godot.zip" -d "$RUNNER_TEMP/godot-bin"
+
+          GODOT="$(find "$RUNNER_TEMP/godot-bin" -maxdepth 1 -type f -name 'Godot_*' -print -quit)"
+          test -n "$GODOT"
+          chmod +x "$GODOT"
+          echo "GODOT_BIN=$GODOT" >> "$GITHUB_ENV"
+
+          mkdir -p "$HOME/.local/share/godot/export_templates/4.7.2.stable"
+          mkdir -p "$RUNNER_TEMP/godot-templates"
+          unzip -q "$RUNNER_TEMP/templates.tpz" -d "$RUNNER_TEMP/godot-templates"
+
+          TEMPLATE="$(find "$RUNNER_TEMP/godot-templates" -type f -name android_debug.apk -print -quit)"
+          test -n "$TEMPLATE"
+          TEMPLATE_DIR="$(dirname "$TEMPLATE")"
+          cp -a "$TEMPLATE_DIR/." "$HOME/.local/share/godot/export_templates/4.7.2.stable/"
+
+          test -s "$HOME/.local/share/godot/export_templates/4.7.2.stable/android_debug.apk"
+          echo "Godot editor and Android export templates installed."
+
+      - name: Configure Godot Android SDK paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.config/godot" "$HOME/.android"
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -n "$SDK"
+          test -d "$SDK"
+          echo "Using Android SDK at $SDK"
+
+          cat > "$HOME/.config/godot/editor_settings-4.tres" <<SETTINGS
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/android_sdk_path = "$SDK"
+          export/android/java_sdk_path = "$JAVA_HOME"
+          SETTINGS
+
+          keytool -genkeypair \
+            -keystore "$HOME/.android/debug.keystore" \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: Validate project with Godot
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$GODOT_BIN" --headless --editor --path . --quit
+
+      - name: Export debug APK only
+        shell: bash
+        env:
+          GODOT_ANDROID_KEYSTORE_DEBUG_PATH: ${{ runner.temp }}/unused
+          GODOT_ANDROID_KEYSTORE_DEBUG_USER: androiddebugkey
+          GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD: android
+        run: |
+          set -euo pipefail
+          mkdir -p build
+
+          export GODOT_ANDROID_KEYSTORE_DEBUG_PATH="$HOME/.android/debug.keystore"
+          "$GODOT_BIN" --headless --path . \
+            --export-debug "Android" build/PocketParty3D-debug.apk
+
+          test -s build/PocketParty3D-debug.apk
+          file build/PocketParty3D-debug.apk
+          ls -lh build/PocketParty3D-debug.apk
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: PocketParty3D-Android-debug
+          path: build/PocketParty3D-debug.apk
+          if-no-files-found: error
+          retention-days: 14
