@@ -31,16 +31,19 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          accept-android-sdk-licenses: true
 
       - name: Install Android SDK packages
         shell: bash
         run: |
           set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
           sdkmanager --install \
             "platform-tools" \
             "platforms;android-36" \
             "build-tools;36.1.0"
-          yes | sdkmanager --licenses >/dev/null || true
 
       - name: Download Godot editor and matching export templates
         shell: bash
@@ -65,27 +68,29 @@ jobs:
           chmod +x "$GODOT"
           echo "GODOT_BIN=$GODOT" >> "$GITHUB_ENV"
 
-          mkdir -p "$HOME/.local/share/godot/export_templates/4.7.2.stable"
           mkdir -p "$RUNNER_TEMP/godot-templates"
           unzip -q "$RUNNER_TEMP/templates.tpz" -d "$RUNNER_TEMP/godot-templates"
 
           TEMPLATE="$(find "$RUNNER_TEMP/godot-templates" -type f -name android_debug.apk -print -quit)"
           test -n "$TEMPLATE"
+
           TEMPLATE_DIR="$(dirname "$TEMPLATE")"
-          cp -a "$TEMPLATE_DIR/." "$HOME/.local/share/godot/export_templates/4.7.2.stable/"
+          DEST="$HOME/.local/share/godot/export_templates/4.7.2.stable"
+          mkdir -p "$DEST"
+          cp -a "$TEMPLATE_DIR/." "$DEST/"
 
-          test -s "$HOME/.local/share/godot/export_templates/4.7.2.stable/android_debug.apk"
-          echo "Godot editor and Android export templates installed."
+          test -s "$DEST/android_debug.apk"
+          echo "Godot editor and Android export template installed."
 
-      - name: Configure Godot Android SDK paths
+      - name: Configure Godot Android SDK paths and debug signing
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$HOME/.config/godot" "$HOME/.android"
+
           SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
           test -n "$SDK"
           test -d "$SDK"
-          echo "Using Android SDK at $SDK"
 
           cat > "$HOME/.config/godot/editor_settings-4.tres" <<SETTINGS
           [gd_resource type="EditorSettings" format=3]
@@ -114,7 +119,6 @@ jobs:
       - name: Export debug APK only
         shell: bash
         env:
-          GODOT_ANDROID_KEYSTORE_DEBUG_PATH: ${{ runner.temp }}/unused
           GODOT_ANDROID_KEYSTORE_DEBUG_USER: androiddebugkey
           GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD: android
         run: |
@@ -122,6 +126,7 @@ jobs:
           mkdir -p build
 
           export GODOT_ANDROID_KEYSTORE_DEBUG_PATH="$HOME/.android/debug.keystore"
+
           "$GODOT_BIN" --headless --path . \
             --export-debug "Android" build/PocketParty3D-debug.apk
 
